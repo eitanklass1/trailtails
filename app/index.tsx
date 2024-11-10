@@ -26,7 +26,8 @@ import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 
 const SERVER_URL = 'http://localhost:3000'; // Update with your server address if needed
 
-const onConnectRedirectLink = Linking.createURL("onConnect");
+// const onConnectRedirectLink = Linking.createURL("onConnect");
+const onConnectRedirectLink = "exp://05zpy8y-eklass-8081.exp.direct/onConnect";
 const onDisconnectRedirectLink = Linking.createURL("onDisconnect");
 
 const connection = new Connection(clusterApiUrl("devnet"));
@@ -111,7 +112,7 @@ const IndexRecord = () => {
     const params = new URLSearchParams({
       dapp_encryption_public_key: bs58.encode(dappKeyPair.publicKey),
       cluster: "devnet",
-      app_url: "exp://oyx_fci-eklass-8081.exp.direct",
+      app_url: "https://7adb-68-181-17-183.ngrok-free.app",
       redirect_link: onConnectRedirectLink,
     });
     const url = buildUrl("connect", params);
