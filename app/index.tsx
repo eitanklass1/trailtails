@@ -9,10 +9,27 @@ import * as TaskManager from 'expo-task-manager';
 import * as Sharing from 'expo-sharing';
 import 'react-native-url-polyfill/auto';
 import { Buffer } from 'buffer';
-import { usePhantomWallet } from './PhantomWallet';
-import { Connection, Transaction, SystemProgram } from '@solana/web3.js';
+// import { usePhantomWallet } from './PhantomWallet';
+import { Connection, Transaction, SystemProgram, clusterApiUrl, PublicKey } from '@solana/web3.js';
+
+import "react-native-get-random-values";
+import "react-native-url-polyfill/auto";
+import * as Linking from "expo-linking";
+import nacl from "tweetnacl";
+import bs58 from "bs58";
+import Toast from "react-native-toast-message";
+import { decryptPayload } from "../utils/decryptPayload";
+import { encryptPayload } from "../utils/encryptPayload";
+import { buildUrl } from "../utils/buildUrl";
+import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
+
 
 const SERVER_URL = 'http://localhost:3000'; // Update with your server address if needed
+
+const onConnectRedirectLink = Linking.createURL("onConnect");
+const onDisconnectRedirectLink = Linking.createURL("onDisconnect");
+
+const connection = new Connection(clusterApiUrl("devnet"));
 
 const IndexRecord = () => {
   const [recording, setRecording] = useState(false);
@@ -27,9 +44,95 @@ const IndexRecord = () => {
   const [initialRegion, setInitialRegion] = useState(null);
   const mapRef = useRef(null);
 
+  const [deeplink, setDeepLink] = useState<string>("");
+  const [dappKeyPair] = useState(nacl.box.keyPair());
+  const [sharedSecret, setSharedSecret] = useState<Uint8Array>();
+  const [session, setSession] = useState<string>();
+  const [phantomWalletPublicKey, setPhantomWalletPublicKey] = useState<PublicKey | null>(null);
 
-  // Phantom wallet integration
-  const { publicKey, connected, connecting, connect, signAndSendTransaction } = usePhantomWallet();
+  // Initialize deeplinking on app startup
+  useEffect(() => {
+    const initializeDeeplinks = async () => {
+      const initialUrl = await Linking.getInitialURL();
+      if (initialUrl) {
+        setDeepLink(initialUrl);
+      }
+    };
+    initializeDeeplinks();
+    const listener = Linking.addEventListener("url", handleDeepLink);
+    return () => {
+      listener.remove();
+    };
+  }, []);
+  
+  const handleDeepLink = ({ url }: Linking.EventType) => setDeepLink(url);
+
+  useEffect(() => {
+    if (!deeplink) return;
+
+    const url = new URL(deeplink);
+    const params = url.searchParams;
+
+    // Handle an error response
+    if (params.get("errorCode")) {
+      const message =
+        params.get("errorMessage") ??
+        JSON.stringify(Object.fromEntries([...params]), null, 2);
+      Toast.show({ type: "error", text1: "Error", text2: message });
+      console.log("error:", message);
+      return;
+    }
+
+    // Handle a `connect` response from Phantom
+    if (/onConnect/.test(url.pathname)) {
+      const sharedSecretDapp = nacl.box.before(
+        bs58.decode(params.get("phantom_encryption_public_key")!),
+        dappKeyPair.secretKey
+      );
+      const connectData = decryptPayload(
+        params.get("data")!,
+        params.get("nonce")!,
+        sharedSecretDapp
+      );
+      setSharedSecret(sharedSecretDapp);
+      setSession(connectData.session);
+      setPhantomWalletPublicKey(new PublicKey(connectData.public_key));
+      console.log(`Connected to: ${connectData.public_key}`);
+    }
+
+    // Handle a `disconnect` response from Phantom
+    if (/onDisconnect/.test(url.pathname)) {
+      setPhantomWalletPublicKey(null);
+      console.log("Disconnected");
+    }
+  }, [deeplink]);
+
+  const connect = async () => {
+    const params = new URLSearchParams({
+      dapp_encryption_public_key: bs58.encode(dappKeyPair.publicKey),
+      cluster: "devnet",
+      app_url: "exp://oyx_fci-eklass-8081.exp.direct",
+      redirect_link: onConnectRedirectLink,
+    });
+    const url = buildUrl("connect", params);
+    Linking.openURL(url);
+  };
+
+  const disconnect = async () => {
+    const payload = { session };
+    const [nonce, encryptedPayload] = encryptPayload(payload, sharedSecret);
+    const params = new URLSearchParams({
+      dapp_encryption_public_key: bs58.encode(dappKeyPair.publicKey),
+      nonce: bs58.encode(nonce),
+      redirect_link: onDisconnectRedirectLink,
+      payload: bs58.encode(encryptedPayload),
+    });
+    const url = buildUrl("disconnect", params);
+    Linking.openURL(url);
+  };
+
+
+  
 
   useEffect(() => {
     (async () => {
@@ -228,16 +331,24 @@ const IndexRecord = () => {
 
 
       <View style={styles.header}>
-        <Button 
+        {phantomWalletPublicKey ? (
+            <>
+              <Text>{`Connected to: ${phantomWalletPublicKey.toString()}`}</Text>
+              <Button title="Disconnect" onPress={disconnect} />
+            </>
+          ) : (
+            <Button title="Connect Phantom" onPress={connect} />
+          )}
+        {/* <Button 
           title={connected ? "Mint NFT" : "Connect Wallet"} 
           onPress={mintNFT} 
-        />
-        {connecting && <Text style={styles.statusText}>Connecting to Phantom...</Text>}
+        /> */}
+        {/* {connecting && <Text style={styles.statusText}>Connecting to Phantom...</Text>}
         {connected && (
           <Text style={styles.statusText}>
             Connected: {publicKey.toString().slice(0, 8)}...
           </Text>
-        )}
+        )} */}
       </View>
       
       {initialRegion && (
